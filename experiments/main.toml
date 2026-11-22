@@ -1,0 +1,50 @@
+# The main connect-task sweep: the five main runs, 100 seeds, the 6-point eps
+# grid, beta {0, 0.1}, {1, 2} walls (12 000 trials).
+#
+# cap = the planner's wall-clock budget in seconds
+# Run:  python3 hitw sweep experiments/main.toml            (resumable)
+#       python3 hitw sweep experiments/main.toml --dry-run  (trial counts and budgets only)
+
+out = "results/main.jsonl"
+workers = 6
+startup_grace = 30.0
+
+[grid]
+seeds = "0-99"
+betas = [0.0, 0.1]
+eps = [0.02, 0.012619146889603867, 0.007962143411069949, 0.00502377286301916, 0.0031697863849222286, 0.002]
+n_walls = [1, 2]
+
+[[run]]
+planner = "kto"
+cap = 18.2
+
+[[run]]
+planner = "gcs-box"
+cap = 0.2
+
+[[run]]
+planner = "iris-gcs"
+cap = 300.0
+
+[[run]]
+planner = "iris-gcs"
+config = { iris = "np2" }
+cap = 135.4
+
+[[run]]
+planner = "rrt-connect"
+cap = 4.7
+
+# The two baseline variants at 20 seeds, if wanted (+1 920 trials):
+# [[run]]
+# planner = "iris-gcs"
+# config = { iris = "np" }
+# seeds = "0-19"
+# cap = 300.0
+#
+# [[run]]
+# planner = "iris-gcs"
+# config = { margin = "default" }
+# seeds = "0-19"
+# cap = 206.5

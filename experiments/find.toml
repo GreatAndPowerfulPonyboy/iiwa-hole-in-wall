@@ -1,0 +1,23 @@
+# The find task: ik-restarts (K = 30) and uniform-sampling under the IK
+# restarts' search time on the same wall (equal compute), 10 seeds, the
+# 6-point eps grid, beta {0, 0.1}, 1 wall.
+#
+# Run:  python3 hitw sweep experiments/find.toml
+
+out = "results/find.jsonl"
+workers = 2
+startup_grace = 30.0
+
+[grid]
+seeds = "0-9"
+betas = [0.0, 0.1]
+eps = [0.02, 0.012619146889603867, 0.007962143411069949, 0.00502377286301916, 0.0031697863849222286, 0.002]
+n_walls = [1]
+
+[[run]]
+planner = "ik-restarts"
+cap = 1200.0
+
+[[run]]
+planner = "uniform-sampling"
+budget_from = "ik-restarts"

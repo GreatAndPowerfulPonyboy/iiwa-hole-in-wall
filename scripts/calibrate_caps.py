@@ -1,15 +1,17 @@
-"""Milestone 5 cap calibration from a pilot results.jsonl.
+"""Cap calibration from a pilot results file.
 
-For each method, over successful trials: median and p95 of the planner time
-(solve_time + region_build_time), of the iteration measure (n_evals for M1,
-samples for M4) and of the process time (total_time).  Proposed wall-clock
-cap = max(10 x median, 3 x p95) of the planner time, clipped to --ceiling;
-proposed iteration cap = 2 x p95.  The process cap enforced by the sweep
-driver is the planner cap plus the re-check/spawn allowance (p95 of
-total_time - planner time), since the driver kills whole processes.
+For each run (config label), over successful trials: median and p95 of the
+planner time (solve_time + region_build_time), of the iteration measure
+(n_evals for kto, samples for rrt-connect) and of the process time
+(total_time).  Proposed planner
+budget (the cap handed to run_sweep) = max(10 x median, 3 x p95) of the
+planner time, clipped to --ceiling; proposed iteration cap = 2 x p95.  The
+sweep kills a process at budget + startup_grace, so the proposed grace is
+the largest p95 over runs of the time spent outside the planner (total_time
+- planner time, plus spawn and imports, which total_time does not see).
 
-Run:  .venv/bin/python scripts/calibrate_caps.py results/pilot_m5.jsonl --ceiling 300
-Writes <stem>_caps.json beside the input: {method: process cap in seconds}.
+Run:  .venv/bin/python scripts/calibrate_caps.py results/pilot_m5.v2.jsonl --ceiling 300
+Writes <stem>_caps.json beside the input: {config label: planner budget in seconds}.
 """
 
 import argparse
@@ -24,6 +26,8 @@ import pandas as pd
 
 from hitw.analysis import results_frame
 
+SPAWN_IMPORT_S = 2.0        # s, process spawn and imports, which total_time does not include
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -37,7 +41,7 @@ def main():
     df["iters"] = df["n_evals"].where(df["n_evals"].notna(), df["iterations"])
     rows = []
     caps = {}
-    for m, g in df.groupby("method"):
+    for m, g in df.groupby("config_label"):
         ok = g[g["success"]]
         if len(ok) == 0:
             rows.append({"method": m, "n": len(g), "n_success": 0})
@@ -53,14 +57,16 @@ def main():
                      "overhead_p95_s": over, "planner_cap_s": cap, "process_cap_s": cap + over,
                      "killed": int(g["killed"].sum()) if "killed" in g else 0,
                      "max_planner_over_cap": int((g["planner_time"] > cap).sum())})
-        caps[m] = round(cap + over, 1)
+        caps[m] = round(cap, 1)
     table = pd.DataFrame(rows)
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 30)
     print(table.to_string(index=False, float_format=lambda v: f"{v:.3g}"))
     out = path.with_name(path.stem + "_caps.json")
     out.write_text(json.dumps(caps, indent=1))
-    print(f"\nproposed process caps written to {out}: {caps}")
+    grace = float(table["overhead_p95_s"].max()) + SPAWN_IMPORT_S if "overhead_p95_s" in table else SPAWN_IMPORT_S
+    print(f"\nproposed planner budgets written to {out}: {caps}")
+    print(f"proposed startup_grace: {grace:.0f} s (largest overhead p95 + {SPAWN_IMPORT_S:.0f} s for spawn and imports)")
 
 
 if __name__ == "__main__":

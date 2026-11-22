@@ -49,7 +49,7 @@ WALL_COLOR = np.array([0.55, 0.6, 0.75, 0.85])
 
 
 def freeze_joint(plant: MultibodyPlant, joint) -> None:
-    """Replace a joint with a weld at its zero pose, and remove its actuator."""
+    """Replace a joint with a weld at its zero pose and remove its actuator (before Finalize)."""
     for i in plant.GetJointActuatorIndices():
         actuator = plant.get_joint_actuator(i)
         if actuator.joint() == joint:
@@ -62,6 +62,29 @@ def freeze_joint(plant: MultibodyPlant, joint) -> None:
 
 @dataclass
 class Scene:
+    """The arm and the walls of a trial in one Drake diagram.
+
+    Configurations are passed as the full 7-vector ``q_full`` (radians);
+    ``q_free`` is its restriction to the free joints (the three pitch joints
+    at beta = 0, all seven otherwise).
+
+    Attributes
+    ----------
+    plant : MultibodyPlant
+        The plant: arm, and the wall carrier on a prismatic y joint (or
+        welded at `fixed_wall_y`).
+    beta : float
+        Roll band in radians.
+    free_joints : tuple of int
+        0-based indices of the free joints in the 7-vector.
+    walls : list of WallSpec
+        The slabs on the carrier.
+    fixed_wall_y : float or None
+        Carrier translation in meters when welded; None when prismatic.
+    rho : float
+        Motion bound of the free joints in m/rad (`kinematics.motion_bound`).
+    """
+
     diagram: Diagram
     plant: MultibodyPlant
     scene_graph: SceneGraph
@@ -84,13 +107,16 @@ class Scene:
     # --- configuration conversions -------------------------------------
     @property
     def num_free(self) -> int:
+        """Number of free joints (3 at beta = 0, 7 otherwise)."""
         return len(self.free_joints)
 
     def q_free(self, q_full: np.ndarray) -> np.ndarray:
+        """Return the free-joint entries, shape (num_free,), of a full 7-vector."""
         q_full = np.asarray(q_full, dtype=float).ravel()
         return q_full[list(self.free_joints)]
 
     def q_full(self, q_free: np.ndarray) -> np.ndarray:
+        """Return the full 7-vector with the given free-joint values and zeros elsewhere."""
         q = np.zeros(params.NUM_JOINTS)
         q[list(self.free_joints)] = np.asarray(q_free, dtype=float).ravel()
         return q
@@ -100,20 +126,23 @@ class Scene:
         return [self._joints[j].position_start() for j in self.free_joints]
 
     def free_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the (lower, upper) position limits of the free joints in radians (rolls banded to beta)."""
         lo = np.array([self._joints[j].position_lower_limits()[0] for j in self.free_joints])
         hi = np.array([self._joints[j].position_upper_limits()[0] for j in self.free_joints])
         return lo, hi
 
     def velocity_limits(self) -> np.ndarray:
-        """Imposed per-joint speed limits for the free joints (LIMIT_SCALE x model)."""
+        """Return the imposed speed limits of the free joints in rad/s (LIMIT_SCALE x the model's)."""
         return params.LIMIT_SCALE * np.array(
             [self._joints[j].velocity_upper_limits()[0] for j in self.free_joints])
 
     def acceleration_limits(self) -> np.ndarray:
+        """Return the imposed acceleration limits of the free joints in rad/s^2 (LIMIT_SCALE x the model's)."""
         return params.LIMIT_SCALE * np.array(
             [self._joints[j].acceleration_upper_limits()[0] for j in self.free_joints])
 
     def check_q(self, q_full: np.ndarray) -> None:
+        """Raise ValueError if a roll joint of the 7-vector is outside the beta band."""
         q_full = np.asarray(q_full, dtype=float).ravel()
         assert q_full.shape == (params.NUM_JOINTS,), q_full.shape
         for j in params.ROLL_JOINTS:
@@ -121,6 +150,7 @@ class Scene:
                 raise ValueError(f"roll joint {j + 1} = {q_full[j]:.4f} exceeds beta = {self.beta}")
 
     def publish(self) -> None:
+        """Publish the current state to Meshcat, if the scene has one."""
         if self.meshcat is not None:
             self.diagram.ForcedPublish(self.context)
 
@@ -134,8 +164,35 @@ def make_scene(
     time_step: float = 0.0,
     robot_diagram: bool = False,
 ) -> Scene:
-    """robot_diagram=True builds a RobotDiagram (RobotDiagramBuilder) so the
-    scene can back a SceneGraphCollisionChecker for IRIS."""
+    """Build the scene of an arm and walls.
+
+    Parameters
+    ----------
+    walls : sequence of WallSpec
+        Slabs to place on one carrier body (each at its ``y_offset``).
+    beta : float
+        Roll band in radians; 0 welds the roll joints (3-D configuration
+        space).
+    fixed_wall_y : float, optional
+        Weld the carrier at this translation in meters instead of putting it
+        on a prismatic joint.
+    meshcat : Meshcat, optional
+        Add a Meshcat visualizer.
+    time_step : float
+        Plant time step in seconds (0 = continuous).
+    robot_diagram : bool
+        Build a RobotDiagram, which a SceneGraphCollisionChecker needs.
+
+    Returns
+    -------
+    Scene
+
+    Notes
+    -----
+    Drake skips collision pairs between two bodies both anchored to the
+    world, so with `fixed_wall_y` the link_0-vs-wall pair is not checked;
+    link_0 never moves, and the prismatic scene checks it.
+    """
     if robot_diagram:
         rdb = RobotDiagramBuilder(time_step=time_step)
         builder, plant, scene_graph, parser = rdb.builder(), rdb.plant(), rdb.scene_graph(), rdb.parser()
@@ -199,8 +256,16 @@ def make_scene(
 
 
 def set_state(scene: Scene, q: np.ndarray, wall_y: float) -> None:
-    """Put the arm at the full 7-vector q (frozen joints must be ~0) and the
-    wall carrier at translation wall_y."""
+    """Set the arm and the wall carrier in the scene's context.
+
+    Parameters
+    ----------
+    scene : Scene
+    q : ndarray, shape (7,)
+        Full joint vector in radians; frozen joints are ignored.
+    wall_y : float
+        Carrier translation in meters (ignored when the carrier is welded).
+    """
     q = np.asarray(q, dtype=float).ravel()
     for j in scene.free_joints:
         scene._joints[j].set_angle(scene.plant_context, float(q[j]))
@@ -209,8 +274,24 @@ def set_state(scene: Scene, q: np.ndarray, wall_y: float) -> None:
 
 
 def signed_distance_pairs(scene: Scene, q: np.ndarray, wall_y: float, cap: float = CLEARANCE_CAP):
-    """All (distance, name_A, name_B) within cap: robot-vs-wall and arm
-    self pairs (adjacent-link pairs are filtered by the model)."""
+    """Return every robot pair closer than `cap`.
+
+    Parameters
+    ----------
+    scene : Scene
+    q : ndarray, shape (7,)
+        Full joint vector in radians.
+    wall_y : float
+        Carrier translation in meters.
+    cap : float
+        Distance cap in meters.
+
+    Returns
+    -------
+    list of (float, str, str)
+        (signed distance in meters, body A, body B) for robot-vs-wall and
+        arm self pairs; adjacent-link pairs are filtered by the model.
+    """
     set_state(scene, q, wall_y)
     qo = scene.scene_graph.get_query_output_port().Eval(scene.sg_context)
     insp = scene.scene_graph.model_inspector()
@@ -226,9 +307,27 @@ def signed_distance_pairs(scene: Scene, q: np.ndarray, wall_y: float, cap: float
 
 
 def min_distance(scene: Scene, q: np.ndarray, wall_y: float, cap: float = CLEARANCE_CAP) -> float:
-    """The shared distance function: smallest signed distance between an arm
-    geometry and any other geometry (wall or another arm link), capped at
-    `cap`.  Negative means penetration."""
+    """Return the smallest signed distance between the arm and anything else.
+
+    This is the shared distance function: the dense re-check and the find
+    task's validity check both use it.
+
+    Parameters
+    ----------
+    scene : Scene
+    q : ndarray, shape (7,)
+        Full joint vector in radians.
+    wall_y : float
+        Carrier translation in meters.
+    cap : float
+        Distance cap in meters; the result is min(true distance, cap).
+
+    Returns
+    -------
+    float
+        Meters; negative means penetration.  Covers arm-vs-wall and arm
+        self pairs.
+    """
     set_state(scene, q, wall_y)
     qo = scene.scene_graph.get_query_output_port().Eval(scene.sg_context)
     best = cap
@@ -239,7 +338,22 @@ def min_distance(scene: Scene, q: np.ndarray, wall_y: float, cap: float = CLEARA
 
 
 def in_collision(scene: Scene, q: np.ndarray, wall_y: float) -> bool:
-    """min_distance(...) < 0 without the distance; about 20x cheaper."""
+    """Return True if ``min_distance(scene, q, wall_y) < 0``, without computing the distance.
+
+    About 20x cheaper than `min_distance`.
+
+    Parameters
+    ----------
+    scene : Scene
+    q : ndarray, shape (7,)
+        Full joint vector in radians.
+    wall_y : float
+        Carrier translation in meters.
+
+    Returns
+    -------
+    bool
+    """
     set_state(scene, q, wall_y)
     qo = scene.scene_graph.get_query_output_port().Eval(scene.sg_context)
     for p in qo.ComputePointPairPenetration():
@@ -249,15 +363,27 @@ def in_collision(scene: Scene, q: np.ndarray, wall_y: float) -> bool:
 
 
 def wall_y_of_t(walls: Sequence[WallSpec], speed: float = params.WALL_SPEED):
-    """Carrier translation as a function of time, given each slab's t_cross
-    and y_offset: wall_y(t) = speed * (t - t_1), so slab i (offset
-    -speed * (t_i - t_1)) is centred on the arm plane exactly at t_i."""
+    """Return the carrier translation as a function of time.
+
+    Parameters
+    ----------
+    walls : sequence of WallSpec
+        Placed slabs (see `place_walls`).
+    speed : float
+        Wall speed in m/s.
+
+    Returns
+    -------
+    callable
+        ``wall_y(t) = speed * (t - t_1)`` in meters, so slab i (offset
+        ``-speed * (t_i - t_1)``) is centred on the arm plane exactly at t_i.
+    """
     t1 = walls[0].t_cross
     return lambda t: speed * (t - t1)
 
 
 def place_walls(walls: Sequence[WallSpec], t_cross: Sequence[float], speed: float = params.WALL_SPEED) -> None:
-    """Assign crossing times and the matching rigid y offsets on the carrier."""
+    """Set each slab's crossing time and its rigid y offset on the carrier."""
     t1 = t_cross[0]
     for spec, t in zip(walls, t_cross):
         spec.t_cross = float(t)

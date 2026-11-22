@@ -1,0 +1,19 @@
+# The tutorial in README.md: the bridge test (planners/bridge_test.py) against uniform
+# sampling on the find task, 10 s of search per wall.  python3 hitw sweep experiments/bridge.toml
+
+out = "out/bridge.jsonl"
+workers = 6
+
+[grid]
+seeds = "0-4"
+betas = [0.0, 0.1]
+eps = [0.02, 0.005]
+n_walls = [1]
+
+[[run]]
+planner = "uniform-sampling"
+cap = 10.0
+
+[[run]]
+planner = "bridge-test"
+cap = 10.0

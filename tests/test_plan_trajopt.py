@@ -1,9 +1,9 @@
-"""M1 (KTO) on a 1-wall sequence at beta = 0, plus the dense re-check."""
+"""kto on a 1-wall sequence at beta = 0, plus the dense re-check."""
 
 import numpy as np
 
 from hitw.evaluate import classify, recheck
-from hitw.plan_trajopt import greville, plan_trajopt, plant_q_of_t
+from planners.kto import greville, plan_trajopt, plant_q_of_t
 from hitw.scene import make_scene
 from hitw.sequences import LETTER_POSES, make_sequence
 
@@ -11,7 +11,7 @@ from hitw.sequences import LETTER_POSES, make_sequence
 def test_kto_one_wall_beta0_passes_recheck():
     seq = make_sequence([LETTER_POSES["L"]], beta=0.0, eps=0.02)
     scene = make_scene(seq.walls, beta=0.0)
-    res = plan_trajopt(seq, scene)
+    res = plan_trajopt(seq, scene, np.random.default_rng(0))
     print(f"  status={res.status} info={res.solver_info} solve_time={res.solve_time:.2f}s evals={res.n_evals}")
     assert res.status == "success", res
     assert res.n_evals > 0 and res.extras["evals_per_attempt"] == [res.n_evals]

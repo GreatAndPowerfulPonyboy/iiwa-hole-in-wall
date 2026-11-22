@@ -1,0 +1,54 @@
+# A small set covering every connect run and the find task (K = 5), beta
+# {0, 0.1}, eps = 10 mm, 1 wall, seeds 0-4: about 3 minutes on 6 workers.
+#
+# Run:  python3 hitw sweep experiments/regression.toml --out OUT.jsonl
+
+out = "results/regression.jsonl"
+workers = 6
+startup_grace = 30.0
+
+[grid]
+seeds = "0-4"
+betas = [0.0, 0.1]
+eps = [0.01]
+n_walls = [1]
+
+[[run]]
+planner = "kto"
+cap = 900.0
+
+[[run]]
+planner = "gcs-box"
+cap = 900.0
+
+[[run]]
+planner = "iris-gcs"
+cap = 900.0
+
+[[run]]
+planner = "iris-gcs"
+config = { iris = "np2" }
+cap = 900.0
+
+[[run]]
+planner = "iris-gcs"
+config = { iris = "np" }
+cap = 900.0
+
+[[run]]
+planner = "iris-gcs"
+config = { margin = "default" }
+cap = 900.0
+
+[[run]]
+planner = "rrt-connect"
+cap = 900.0
+
+[[run]]
+planner = "ik-restarts"
+config = { K = 5 }
+cap = 900.0
+
+[[run]]
+planner = "uniform-sampling"
+budget_from = "ik-restarts[K=5]"

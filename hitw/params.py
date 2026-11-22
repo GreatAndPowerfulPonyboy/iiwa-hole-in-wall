@@ -1,4 +1,4 @@
-"""Physical parameters approved at milestone 0 (2026-11-13). See PROGRESS.md."""
+"""Physical parameters of the benchmark: robot, wall, timing, limits and the report grid."""
 
 import numpy as np
 

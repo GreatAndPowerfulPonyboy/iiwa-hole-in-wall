@@ -111,18 +111,33 @@ class BareArm:
 
 @lru_cache(maxsize=1)
 def bare_arm() -> BareArm:
+    """Return the shared bare 7-DOF arm."""
     return BareArm()
 
 
 @lru_cache(maxsize=1)
 def joint_radii() -> np.ndarray:
+    """Return r, shape (7,): per joint, a bound in meters on the distance from its axis to any point it moves."""
     return bare_arm().joint_radii()
 
 
 def motion_bound(radii: np.ndarray, free_joints=None) -> float:
-    """rho: no point of the arm travels farther than rho * ||q - q'||_2 when
-    the configuration moves from q to q'.
+    """Return rho: no point of the arm travels farther than rho * ||q - q'||_2.
 
+    Parameters
+    ----------
+    radii : ndarray, shape (7,)
+        Joint radii in meters (`joint_radii`).
+    free_joints : sequence of int, optional
+        Joints that move; None means all seven.
+
+    Returns
+    -------
+    float
+        m/rad.
+
+    Notes
+    -----
     Rotating the joints one at a time moves any point by at most
     sum_j r_j |dq_j| <= ||r||_2 ||dq||_2.  With joints frozen (beta = 0) only
     the free joints' radii count.
@@ -134,6 +149,5 @@ def motion_bound(radii: np.ndarray, free_joints=None) -> float:
 
 
 def arm_depth(q: np.ndarray) -> float:
-    """d: the arm's full extent along y at q (twice the largest |y| of any
-    collision-box corner)."""
+    """Return d in meters: the arm's full extent along y at q, shape (7,) (twice the largest |y| of any box corner)."""
     return float(2.0 * np.abs(bare_arm().all_corners(q)[:, 1]).max())

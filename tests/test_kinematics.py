@@ -5,12 +5,12 @@ import numpy as np
 from hitw import params
 from hitw.kinematics import arm_depth, bare_arm, joint_radii, motion_bound
 
-M0_RADII = np.array([0.965, 0.965, 0.566, 0.566, 0.166, 0.166, 0.073])
+MEASURED_RADII = np.array([0.965, 0.965, 0.566, 0.566, 0.166, 0.166, 0.073])
 
 
-def test_joint_radii_match_milestone0():
+def test_joint_radii_match_measured_values():
     r = joint_radii()
-    assert np.allclose(r, M0_RADII, atol=1e-3), r
+    assert np.allclose(r, MEASURED_RADII, atol=1e-3), r
     assert abs(motion_bound(r) - 1.602) < 1e-3
     assert motion_bound(r, params.PITCH_JOINTS) < motion_bound(r)
 

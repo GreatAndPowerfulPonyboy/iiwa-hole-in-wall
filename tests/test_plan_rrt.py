@@ -1,9 +1,9 @@
-"""M4 (time-augmented RRT-Connect) on 1- and 2-wall sequences."""
+"""rrt-connect (time-augmented RRT-Connect) on 1- and 2-wall sequences."""
 
 import numpy as np
 
 from hitw.evaluate import recheck
-from hitw.plan_rrt import STEP, _Segment, _Tree, plan_rrt, rrt_q_of_t
+from planners.rrt_connect import STEP, _Segment, _Tree, plan_rrt, rrt_q_of_t
 from hitw.scene import make_scene
 from hitw.sequences import LETTER_POSES, make_sequence
 
@@ -29,7 +29,7 @@ def test_extend_assigns_max_speed_times_and_respects_velocity():
 
 def _pillar_scene():
     """A static pillar in the arm plane that blocks the straight line I -> L
-    while both poses stay clear (searched for in milestone 4)."""
+    while both poses stay clear."""
     from shapely.geometry import box as shapely_box
     from hitw.walls import WallSpec
     spec = WallSpec(q_star=np.zeros(7), eps=0.0, strip=0.01, thickness=0.05, width=0.08, z0=0.85, height=0.3,
@@ -63,8 +63,8 @@ def test_rrt_one_and_two_walls():
     for poses in (["L"], ["L", "SLASH"]):
         seq = make_sequence([LETTER_POSES[p] for p in poses], beta=0.0, eps=0.02, names=poses)
         scene = make_scene(seq.walls, beta=0.0)
-        res = plan_rrt(seq, scene, seed=0)
-        print(f"  M4 {poses}: {res.status} samples={res.iterations} checks={res.extras['checks']} "
+        res = plan_rrt(seq, scene, np.random.default_rng(0))
+        print(f"  rrt-connect {poses}: {res.status} samples={res.iterations} checks={res.extras['checks']} "
               f"res={res.extras['edge_resolution']:.4f} solve={res.solve_time:.2f}s segs={res.extras['segments']}")
         assert res.status == "success", res
         ts = [t for _, t in res.knots]

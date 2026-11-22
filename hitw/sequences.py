@@ -48,6 +48,25 @@ Q_HOME = np.zeros(params.NUM_JOINTS)
 
 @dataclass
 class Crossing:
+    """One crossing: the configuration to match while the wall passes.
+
+    Attributes
+    ----------
+    q_star : ndarray, shape (7,)
+        Crossing configuration in radians.
+    t : float
+        Crossing time in seconds (the slab is centred on the arm plane).
+    delta : float
+        Window half-width in seconds: the wall overlaps the arm for
+        ``|t' - t| <= delta``.
+    tol : float
+        Joint-space 2-norm tolerance in radians around q_star inside the window.
+    roll_draw : ndarray, shape (4,)
+        The roll values drawn for this crossing (zeros at beta = 0).
+    name : str
+        Name of the pose.
+    """
+
     q_star: np.ndarray          # full 7-vector
     t: float                    # crossing time, s
     delta: float                # window half-width, s
@@ -57,11 +76,34 @@ class Crossing:
 
     @property
     def window(self) -> tuple[float, float]:
+        """(start, end) of the window in seconds."""
         return (self.t - self.delta, self.t + self.delta)
 
 
 @dataclass
 class Sequence:
+    """A connect problem: start configuration, crossings, walls and timing.
+
+    Attributes
+    ----------
+    beta : float
+        Roll band in radians.
+    eps : float
+        Clearance in meters.
+    q0 : ndarray, shape (7,)
+        Start configuration in radians (zero velocity at both ends).
+    crossings : list of Crossing
+        In time order.
+    walls : list of WallSpec
+        One per crossing, placed on the carrier.
+    T : float
+        Trajectory duration in seconds; q_of_t must cover [0, T].
+    speed : float
+        Wall speed in m/s.
+    rho : float
+        Motion bound of the free joints in m/rad.
+    """
+
     beta: float
     eps: float
     q0: np.ndarray
@@ -74,18 +116,21 @@ class Sequence:
 
     @property
     def n_walls(self) -> int:
+        """Number of walls."""
         return len(self.crossings)
 
     def wall_y_of_t(self):
+        """Return the carrier translation ``wall_y(t)`` in meters as a function of time in seconds."""
         t1 = self.crossings[0].t
         return lambda t: self.speed * (t - t1)
 
     def q_stars(self) -> np.ndarray:
+        """Return the crossing configurations, shape (n_walls, 7)."""
         return np.array([c.q_star for c in self.crossings])
 
 
 def draw_rolls(q_pitch: np.ndarray, beta: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """q with the four roll joints redrawn uniformly in [-beta, beta]."""
+    """Return (q, rolls): `q_pitch` with the four roll joints drawn uniformly in [-beta, beta]."""
     q = np.asarray(q_pitch, dtype=float).ravel().copy()
     rolls = rng.uniform(-beta, beta, size=len(params.ROLL_JOINTS)) if beta > 0 else np.zeros(4)
     q[list(params.ROLL_JOINTS)] = rolls
@@ -105,8 +150,37 @@ def make_sequence(
     names: list[str] | None = None,
     strip: float = params.STRIP_HEIGHT,
 ) -> Sequence:
-    """Build the walls, windows and tolerances for the given pitch poses.  With
-    beta > 0 an rng is required for the roll draws."""
+    """Build a connect problem from crossing poses.
+
+    Parameters
+    ----------
+    q_stars : list of ndarray, shape (7,)
+        Pitch poses in radians; their roll joints are redrawn.
+    beta : float
+        Roll band in radians.
+    eps : float
+        Clearance in meters.
+    rng : numpy.random.Generator, optional
+        Source of the roll draws; required when beta > 0.
+    q0 : ndarray, shape (7,)
+        Start configuration.
+    t_first, spacing, tail : float
+        First crossing time, time between crossings and time after the
+        last one, in seconds.
+    names : list of str, optional
+        Pose names.
+    strip : float
+        Strip height in meters for cutting the walls.
+
+    Returns
+    -------
+    Sequence
+
+    Raises
+    ------
+    ValueError
+        If beta > 0 and `rng` is None.
+    """
     if beta > 0 and rng is None:
         raise ValueError("beta > 0 needs an rng for the roll draws")
     free = params.PITCH_JOINTS if beta <= 0 else tuple(range(params.NUM_JOINTS))
@@ -128,8 +202,23 @@ def make_sequence(
 
 
 def reference_path(seq: Sequence):
-    """Piecewise-linear q(t) through q0 and the crossings, held at q*_i over
-    each window and at the last q* until T: the planners' warm start."""
+    """Return the piecewise-linear reference path used as a warm start.
+
+    Parameters
+    ----------
+    seq : Sequence
+
+    Returns
+    -------
+    pydrake.trajectories.PiecewisePolynomial
+        q(t) through q0 and the crossings, held at q*_i over each window
+        and at the last q* until T; ``.value(t)`` is shape (7, 1).
+
+    Raises
+    ------
+    ValueError
+        If the windows overlap or leave no transit time.
+    """
     times = [0.0]
     knots = [seq.q0]
     for c in seq.crossings:
@@ -144,6 +233,7 @@ def reference_path(seq: Sequence):
 
 
 def in_window(seq: Sequence, t: float) -> Crossing | None:
+    """Return the crossing whose window contains time `t` in seconds, or None."""
     for c in seq.crossings:
         if c.t - c.delta <= t <= c.t + c.delta:
             return c
@@ -153,9 +243,11 @@ def in_window(seq: Sequence, t: float) -> Crossing | None:
 # --- straight-line transit feasibility (sequence acceptance test) ----------
 
 def toppra_time(q_a: np.ndarray, q_b: np.ndarray, scale: float = params.LIMIT_SCALE) -> float | None:
-    """Minimum travel time along the straight line from q_a to q_b under the
-    imposed velocity and acceleration limits (Toppra on the bare 7-DOF arm),
-    or None if Toppra fails."""
+    """Return the minimum time in seconds to travel the straight line from q_a to q_b.
+
+    Under the imposed velocity and acceleration limits (Toppra on the bare
+    7-DOF arm); None if Toppra fails.
+    """
     arm = bare_arm()
     path = PiecewisePolynomial.FirstOrderHold([0.0, 1.0], np.column_stack([q_a, q_b]))
     grid = Toppra.CalcGridPoints(path, CalcGridPointsOptions())
@@ -171,7 +263,7 @@ def toppra_time(q_a: np.ndarray, q_b: np.ndarray, scale: float = params.LIMIT_SC
 
 
 def edge_is_free(scene: Scene, q_a: np.ndarray, q_b: np.ndarray, wall_y: float, step: float) -> bool:
-    """Straight-line edge check at joint-space resolution `step` (2-norm)."""
+    """Return True if the straight edge q_a -> q_b is collision free at wall_y, checked every `step` rad (2-norm)."""
     n = max(1, int(np.ceil(np.linalg.norm(scene.q_free(q_b) - scene.q_free(q_a)) / step)))
     for k in range(n + 1):
         if in_collision(scene, q_a + (q_b - q_a) * k / n, wall_y):
@@ -180,11 +272,31 @@ def edge_is_free(scene: Scene, q_a: np.ndarray, q_b: np.ndarray, wall_y: float, 
 
 
 def transit_feasible(seq: Sequence, scene: Scene, edge_step: float = 0.01) -> tuple[bool, dict]:
-    """The sufficient (not necessary) acceptance test: every straight-line
-    edge q0 -> q*_1 -> ... is self-collision free with the wall far away, and
-    its Toppra travel time plus the two adjacent window half-widths fits the
-    time available.  Curved paths may solve sequences this rejects, so a
-    generator using it is biased toward easy sequences."""
+    """Test whether straight-line transits solve the sequence (sufficient, not necessary).
+
+    Every straight-line edge q0 -> q*_1 -> ... must be self-collision free
+    with the wall far away, and its Toppra travel time plus the two adjacent
+    window half-widths must fit the time available.
+
+    Parameters
+    ----------
+    seq : Sequence
+    scene : Scene
+        A scene of the same beta.
+    edge_step : float
+        Edge-check resolution in radians.
+
+    Returns
+    -------
+    ok : bool
+    info : dict
+        Per leg: edge free, Toppra time and time available.
+
+    Notes
+    -----
+    Curved paths may solve sequences this rejects, so a generator using it
+    is biased toward easy sequences.
+    """
     legs = [(seq.q0, 0.0, 0.0)] + [(c.q_star, c.t, c.delta) for c in seq.crossings]
     info = {"legs": []}
     ok = True
@@ -210,8 +322,33 @@ def random_sequence(
     max_tries: int = 100,
     **kwargs,
 ) -> Sequence | None:
-    """n crossings drawn from pose_pool (default LETTER_POSES, no immediate
-    repeats), rolls drawn from rng, accepted only if transit_feasible."""
+    """Draw a random connect problem.
+
+    Parameters
+    ----------
+    n : int
+        Number of crossings.
+    rng : numpy.random.Generator
+        Source of the pose choices and roll draws.
+    beta : float
+        Roll band in radians.
+    eps : float
+        Clearance in meters.
+    scene : Scene
+        A scene of the same beta, for the transit test.
+    pose_pool : dict, optional
+        Name to pose; defaults to LETTER_POSES.  No pose repeats
+        immediately.
+    max_tries : int
+        Draws before giving up.
+    **kwargs
+        Passed to `make_sequence`.
+
+    Returns
+    -------
+    Sequence or None
+        The first draw that passes `transit_feasible`, or None.
+    """
     pool = pose_pool or LETTER_POSES
     names = list(pool)
     for _ in range(max_tries):

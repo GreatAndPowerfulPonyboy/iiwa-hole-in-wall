@@ -24,6 +24,7 @@ _meshcat: Meshcat | None = None
 
 
 def get_meshcat() -> Meshcat | None:
+    """Return the shared Meshcat server, starting it on first use; None when HEADLESS is set."""
     global _meshcat
     if HEADLESS:
         return None
@@ -53,8 +54,30 @@ def play(
     html_path: str | Path | None = None,
     realtime: bool = False,
 ) -> Path | None:
-    """Animate arm and wall from t = 0 to T, publish the recording and
-    optionally write it to HTML.  q_of_t returns the full 7-vector."""
+    """Animate arm and wall from t = 0 to T and record it.
+
+    Parameters
+    ----------
+    scene : Scene
+        A scene built with a Meshcat; nothing happens without one.
+    q_of_t : callable
+        ``q_of_t(t) -> ndarray, shape (7,)`` in radians.
+    wall_y_of_t : callable
+        Carrier translation in meters as a function of time.
+    T : float
+        Duration in seconds.
+    fps : float
+        Recording frame rate.
+    html_path : str or Path, optional
+        Write the recording as self-contained HTML here.
+    realtime : bool
+        Pace the playback to wall-clock time.
+
+    Returns
+    -------
+    Path or None
+        The HTML file, if written.
+    """
     if scene.meshcat is None:
         return None
     meshcat = scene.meshcat
@@ -79,5 +102,6 @@ def play(
 
 
 def keep_open() -> None:
+    """Wait for Enter so the Meshcat server stays up."""
     if _meshcat is not None:
         input("Press Enter to quit.")

@@ -38,6 +38,28 @@ _BUFFER_SCALE = 1.0 / np.cos(np.pi / (2 * BUFFER_QUAD_SEGS))
 
 @dataclass
 class WallSpec:
+    """One wall slab: axis-aligned boxes of material around an opening.
+
+    Attributes
+    ----------
+    q_star : ndarray, shape (7,)
+        Crossing configuration the opening was cut for, radians.
+    eps : float
+        Nominal clearance in meters.
+    boxes : list of (cx, cz, w, h)
+        Material boxes in the slab frame, meters.
+    thickness, width, z0, height : float
+        Slab extents in meters (thickness along y).
+    silhouette, opening : shapely Polygon
+        The arm silhouette U at q_star and O = U buffered by eps, in x-z.
+    arm_depth : float
+        Arm extent along y at q_star, meters.
+    y_offset : float
+        Slab plane offset on the carrier, meters.
+    t_cross : float or None
+        Crossing time in seconds, set by the sequence.
+    """
+
     q_star: np.ndarray                 # full 7-vector crossing configuration
     eps: float                         # nominal clearance, m
     strip: float                       # strip height used for cutting, m
@@ -109,6 +131,35 @@ def make_wall(
     height: float = params.SLAB_HEIGHT,
     merge: bool = True,
 ) -> WallSpec:
+    """Cut the buffered silhouette of the arm at `q_star` out of a slab.
+
+    Parameters
+    ----------
+    q_star : ndarray, shape (7,)
+        Crossing configuration in radians.
+    eps : float
+        Clearance in meters.
+    strip : float
+        Strip height in meters.
+    thickness, width, z0, height : float
+        Slab extents in meters.
+    merge : bool
+        Merge vertically adjacent boxes with the same x-interval.
+
+    Returns
+    -------
+    WallSpec
+
+    Raises
+    ------
+    ValueError
+        If the opening is not strictly inside the slab.
+
+    Notes
+    -----
+    The realized clearance at q_star is at least eps (module docstring), and
+    at least eps / 2 within eps / (2 rho) of it.
+    """
     q_star = np.asarray(q_star, dtype=float).ravel()
     U = silhouette_polygon(q_star)
     O = U.buffer(eps * _BUFFER_SCALE, quad_segs=BUFFER_QUAD_SEGS)
